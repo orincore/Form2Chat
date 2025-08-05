@@ -1,0 +1,46 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const winston = require('winston');
+const mongoose = require('mongoose');
+const contactRoutes = require('./routes/contact');
+const whatsappRoutes = require('./routes/whatsapp');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Winston logger setup
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console(),
+    // Add file transport if needed
+  ],
+});
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// MongoDB connection (optional)
+if (process.env.MONGODB_URI) {
+  mongoose.connect(process.env.MONGODB_URI)
+    .then(() => logger.info('MongoDB connected'))
+    .catch((err) => logger.error('MongoDB connection error:', err));
+}
+
+// Routes
+app.use('/api/contact-form', contactRoutes);
+app.use('/api/whatsapp', whatsappRoutes);
+
+app.get('/', (req, res) => {
+  res.send('Form2WhatsApp Bridge is running.');
+});
+
+app.listen(PORT, () => {
+  logger.info(`Server running on port ${PORT}`);
+});
