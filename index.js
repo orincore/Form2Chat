@@ -37,6 +37,11 @@ if (process.env.MONGODB_URI) {
 app.use('/api/contact-form', contactRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 
+// Health check endpoint for pinging
+app.get('/api/ping', (req, res) => {
+  res.status(200).json({ message: 'Server is running' });
+});
+
 app.get('/', (req, res) => {
   res.send('Form2WhatsApp Bridge is running.');
 });
