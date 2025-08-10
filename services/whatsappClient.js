@@ -1,4 +1,6 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, RemoteAuth } = require('whatsapp-web.js');
+const { MongoStore } = require('wwebjs-mongo');
+const mongoose = require('mongoose');
 const winston = require('winston');
 const qrcode = require('qrcode-terminal');
 
@@ -13,101 +15,115 @@ const logger = winston.createLogger({
   ],
 });
 
-// Simple, stable client configuration
-const client = new Client({
-  authStrategy: new LocalAuth({
-    clientId: 'wa-web-client',
-    dataPath: './.wwebjs_auth'
-  }),
-  puppeteer: {
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--no-first-run',
-      '--disable-extensions',
-      '--disable-plugins',
-      '--disable-images',
-      '--disable-javascript-harmony-shipping',
-      '--disable-default-apps',
-      '--disable-sync',
-      '--disable-translate',
-      '--hide-scrollbars',
-      '--mute-audio',
-      '--no-default-browser-check',
-      '--no-experiments',
-      '--no-pings',
-      '--single-process',
-      '--disable-web-security',
-      '--disable-features=VizDisplayCompositor',
-      '--disable-background-timer-throttling',
-      '--disable-backgrounding-occluded-windows',
-      '--disable-renderer-backgrounding',
-      '--disable-field-trial-config',
-      '--disable-ipc-flooding-protection',
-      '--disable-hang-monitor',
-      '--disable-prompt-on-repost',
-      '--disable-client-side-phishing-detection',
-      '--disable-component-extensions-with-background-pages',
-      '--disable-breakpad',
-      '--disable-features=Translate,BackForwardCache,AcceptCHFrame,AvoidUnnecessaryBeforeUnloadCheckSync',
-      '--force-color-profile=srgb',
-      '--metrics-recording-only',
-      '--enable-automation',
-      '--password-store=basic',
-      '--use-mock-keychain',
-      '--enable-blink-features=IdleDetection',
-      '--export-tagged-pdf',
-      '--user-data-dir=./.wwebjs_auth/session'
-    ],
-    timeout: 60000,
-    protocolTimeout: 60000,
-    defaultViewport: null
-  },
-  takeoverOnConflict: true,
-  takeoverTimeoutMs: 10000
-});
+// WhatsApp client and store variables
+let client = null;
+let store = null;
 
-client.on('qr', (qr) => {
-  logger.info({ event: 'QRGenerated', message: 'Scan this QR code with WhatsApp.' });
-  console.log('\n🔐 WHATSAPP AUTHENTICATION REQUIRED');
-  console.log('=====================================');
-  console.log('Please scan the QR code below with your WhatsApp mobile app:');
-  console.log('1. Open WhatsApp on your phone');
-  console.log('2. Go to Settings > Linked Devices');
-  console.log('3. Tap "Link a Device"');
-  console.log('4. Scan the QR code below:\n');
-  qrcode.generate(qr, { small: true });
-  console.log('\n⏳ Waiting for QR code scan...\n');
-});
+// Function to initialize WhatsApp client (called after MongoDB connects)
+function initializeWhatsAppClient() {
+  if (client) {
+    console.log('⚠️  WhatsApp client already initialized');
+    return client;
+  }
 
-client.on('ready', () => {
-  logger.info({ event: 'WhatsAppReady', message: 'WhatsApp client is ready.' });
-  console.log('✅ WhatsApp client is ready and authenticated!');
-  console.log('📱 You can now send messages through the API.\n');
-});
+  console.log('🔄 Initializing WhatsApp client with MongoDB session store...');
+  
+  // Create MongoDB store for session management
+  store = new MongoStore({ mongoose: mongoose });
 
-client.on('authenticated', () => {
-  logger.info({ event: 'WhatsAppAuthenticated', message: 'WhatsApp authentication successful.' });
-  console.log('✅ WhatsApp authentication successful!');
-});
+  // Create WhatsApp client with RemoteAuth strategy
+  client = new Client({
+    authStrategy: new RemoteAuth({
+      clientId: 'wa-web-client', // Unique identifier for this session
+      store: store,
+      backupSyncIntervalMs: 300000 // 5 minutes backup sync
+    }),
+    puppeteer: {
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu'
+      ]
+    },
+    takeoverOnConflict: true,
+    takeoverTimeoutMs: 10000
+  });
 
-client.on('auth_failure', (msg) => {
-  logger.error({ event: 'AuthFailure', message: msg });
-  console.log('❌ WhatsApp authentication failed:', msg);
-});
+  client.on('qr', (qr) => {
+    logger.info({ event: 'QRGenerated', message: 'Scan this QR code with WhatsApp.' });
+    console.log('\n🔐 WHATSAPP AUTHENTICATION REQUIRED');
+    console.log('=====================================');
+    console.log('Please scan the QR code below with your WhatsApp mobile app:');
+    console.log('1. Open WhatsApp on your phone');
+    console.log('2. Go to Settings > Linked Devices');
+    console.log('3. Tap "Link a Device"');
+    console.log('4. Scan the QR code below:\n');
+    qrcode.generate(qr, { small: true });
+    console.log('\n⏳ Waiting for QR code scan...\n');
+  });
 
-client.on('disconnected', (reason) => {
-  logger.warn({ event: 'WhatsAppDisconnected', reason });
-  console.log('⚠️  WhatsApp disconnected:', reason);
-});
+  client.on('ready', () => {
+    logger.info({ event: 'WhatsAppReady', message: 'WhatsApp client is ready.' });
+    console.log('✅ WhatsApp client is ready and authenticated!');
+    console.log('📱 You can now send messages through the API.\n');
+  });
 
-// Initialize the client
-client.initialize().catch((error) => {
-  logger.error({ event: 'InitializationFailed', error: error.message });
-});
+  client.on('authenticated', (session) => {
+    logger.info({ event: 'WhatsAppAuthenticated', message: 'WhatsApp authentication successful.' });
+    console.log('✅ WhatsApp authentication successful!');
+    console.log('💾 Session will be saved to MongoDB automatically...');
+    console.log('⏳ Please wait ~1 minute for session to be fully saved to MongoDB.');
+  });
+
+  // Listen for remote session saved event
+  client.on('remote_session_saved', () => {
+    logger.info({ event: 'RemoteSessionSaved', message: 'WhatsApp session saved to MongoDB.' });
+    console.log('✅ WhatsApp session successfully saved to MongoDB!');
+    console.log('🔄 Session backups will sync every 5 minutes.');
+    console.log('🚀 Server restarts will now restore this session automatically!');
+  });
+
+  // Add session loading event
+  client.on('loading_screen', (percent, message) => {
+    console.log(`🔄 Loading WhatsApp: ${percent}% - ${message}`);
+  });
+
+  // Add debug logging for session restore
+  console.log('🔍 Checking for existing session in MongoDB...');
+  store.sessionExists({ session: 'wa-web-client' })
+    .then(exists => {
+      if (exists) {
+        console.log('✅ Found existing session in MongoDB - will attempt to restore');
+      } else {
+        console.log('⚠️  No existing session found - QR code will be required');
+      }
+    })
+    .catch(err => {
+      console.log('❌ Error checking session:', err.message);
+    });
+
+  client.on('auth_failure', (msg) => {
+    logger.error({ event: 'AuthFailure', message: msg });
+    console.log('❌ WhatsApp authentication failed:', msg);
+  });
+
+  client.on('disconnected', (reason) => {
+    logger.warn({ event: 'WhatsAppDisconnected', reason });
+    console.log('⚠️  WhatsApp disconnected:', reason);
+  });
+
+  // Initialize the client
+  client.initialize().catch((error) => {
+    logger.error({ event: 'InitializationFailed', error: error.message });
+  });
+  
+  return client;
+}
+
+// Export the initialization function to be called after MongoDB connects
+module.exports.initializeWhatsAppClient = initializeWhatsAppClient;
 
 async function sendMessage(number, message) {
   const maxRetries = 3;
@@ -285,5 +301,6 @@ module.exports = {
   sendMessage, 
   getClientStatus, 
   generateQRCode,
-  restartClient 
+  restartClient,
+  initializeWhatsAppClient
 };

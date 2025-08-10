@@ -5,6 +5,7 @@ const winston = require('winston');
 const mongoose = require('mongoose');
 const contactRoutes = require('./routes/contact');
 const whatsappRoutes = require('./routes/whatsapp');
+const { initializeWhatsAppClient } = require('./services/whatsappClient');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -29,8 +30,15 @@ app.use(express.json());
 // MongoDB connection (optional)
 if (process.env.MONGODB_URI) {
   mongoose.connect(process.env.MONGODB_URI)
-    .then(() => logger.info('MongoDB connected'))
+    .then(() => {
+      logger.info('MongoDB connected');
+      // Initialize WhatsApp client after MongoDB connection
+      console.log('🔄 Starting WhatsApp client initialization...');
+      initializeWhatsAppClient();
+    })
     .catch((err) => logger.error('MongoDB connection error:', err));
+} else {
+  logger.warn('No MONGODB_URI provided, WhatsApp client will not be initialized');
 }
 
 // Routes
