@@ -1,6 +1,6 @@
 # WhatsApp Web Bridge API
 
-A robust Node.js application that bridges web forms to WhatsApp messages using the whatsapp-web.js library.
+A robust Node.js application that bridges web forms to WhatsApp messages using the whatsapp-web.js library with OTP verification system.
 
 **Created by:** [ORINCORE](https://github.com/orincore) (Adarsh Suradkar)
 
@@ -13,6 +13,11 @@ A robust Node.js application that bridges web forms to WhatsApp messages using t
 - ✅ Comprehensive error handling and retry logic
 - ✅ API key authentication
 - ✅ Winston logging with structured logs
+- ✅ Secure OTP generation and verification
+- ✅ WhatsApp-based OTP delivery
+- ✅ Rate limiting and cooldown protection
+- ✅ MongoDB-backed session management
+- ✅ Transaction-safe OTP verification
 
 ## Recent Fixes & Improvements
 
@@ -36,6 +41,128 @@ A robust Node.js application that bridges web forms to WhatsApp messages using t
 - **Better API responses**: Detailed success/failure information
 - **Improved validation**: Comprehensive input validation for all endpoints
 - **Error categorization**: Specific HTTP status codes for different error types
+
+## OTP System
+
+### Overview
+The OTP (One-Time Password) system provides secure verification of phone numbers through WhatsApp. It allows you to:
+
+- Generate and send time-based OTPs to WhatsApp numbers
+- Verify OTPs with secure validation
+- Prevent abuse with rate limiting and cooldown periods
+- Track OTP attempts and expirations
+
+### OTP API Endpoints
+
+#### 1. Send OTP
+Send a new OTP to a WhatsApp number.
+
+```http
+POST /api/otp/send
+Content-Type: application/json
+X-API-Key: your_api_key
+
+{
+  "contactNumber": "+1234567890",
+  "reason": "account_verification",
+  "appName": "Your App Name"
+}
+```
+
+**Parameters:**
+- `contactNumber`: Recipient's phone number with country code (e.g., +1234567890)
+- `reason`: (Optional) Purpose of the OTP (e.g., "account_verification", "password_reset")
+- `appName`: (Optional) Your application name for the OTP message
+
+**Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "OTP sent successfully",
+  "uuid": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+#### 2. Verify OTP
+Verify an OTP that was sent to a phone number.
+
+```http
+GET /api/otp/verify?uuid=550e8400-e29b-41d4-a716-446655440000&contactNumber=%2B1234567890&otp=123456
+X-API-Key: your_api_key
+```
+
+**Query Parameters:**
+- `uuid`: The UUID received from the send OTP endpoint
+- `contactNumber`: The phone number that received the OTP
+- `otp`: The OTP code to verify
+
+**Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "OTP verified successfully",
+  "verifiedFor": "account_verification",
+  "contactNumber": "+1234567890",
+  "timestamp": "2025-08-10T21:59:44.994Z"
+}
+```
+
+#### 3. Check OTP Status (Optional)
+Check the status of an OTP request.
+
+```http
+GET /api/otp/status/550e8400-e29b-41d4-a716-446655440000
+X-API-Key: your_api_key
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "status": "verified",
+  "attempts": 1,
+  "createdAt": "2025-08-10T21:59:44.994Z"
+}
+```
+
+### Security Features
+
+1. **Rate Limiting**:
+   - Max 3 OTP requests per phone number per 15 minutes
+   - Prevents OTP flooding and abuse
+
+2. **OTP Expiration**:
+   - OTPs expire after 5 minutes
+   - Automatically cleaned up from the database after expiration
+
+3. **Attempt Limits**:
+   - Maximum 5 verification attempts per OTP
+   - Prevents brute force attacks
+
+4. **Cooldown Period**:
+   - 2-minute cooldown between OTP requests for the same number
+   - Prevents rapid-fire OTP generation
+
+5. **Transaction Safety**:
+   - Uses MongoDB transactions for atomic operations
+   - Ensures data consistency during verification
+
+### Error Handling
+
+Common error responses include:
+
+```json
+{
+  "success": false,
+  "error": "Error message"
+}
+```
+
+**Common Error Scenarios:**
+- `400 Bad Request`: Missing or invalid parameters
+- `403 Forbidden`: Invalid API key
+- `429 Too Many Requests`: Rate limit exceeded
+- `500 Internal Server Error`: Server-side error
 
 ## Installation
 

@@ -5,6 +5,7 @@ const winston = require('winston');
 const mongoose = require('mongoose');
 const contactRoutes = require('./routes/contact');
 const whatsappRoutes = require('./routes/whatsapp');
+const otpRoutes = require('./routes/otp');
 const { initializeWhatsAppClient } = require('./services/whatsappClient');
 
 const app = express();
@@ -44,6 +45,7 @@ if (process.env.MONGODB_URI) {
 // Routes
 app.use('/api/contact-form', contactRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
+app.use('/api/otp', otpRoutes);
 
 // Health check endpoint for pinging
 app.get('/api/ping', (req, res) => {
