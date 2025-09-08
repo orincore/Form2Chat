@@ -103,8 +103,32 @@ function initializeWhatsAppClient() {
             console.log('✅ Client info retrieved successfully after manual check!');
             logger.info({ event: 'ClientInfoRetrieved', wid: client.info.wid });
           } else {
-            console.log('❌ Still no client info available. May need to re-authenticate.');
+            console.log('❌ Still no client info available. Destroying and reinitializing client...');
             logger.error({ event: 'ClientInfoUnavailable' });
+            
+            // Clear corrupted session and reinitialize
+            try {
+              console.log('🗑️  Clearing corrupted session data...');
+              await client.destroy();
+              
+              // Clear the session from MongoDB
+              if (store) {
+                await store.delete({ session: 'wa-web-client' });
+                console.log('🗑️  Cleared session from MongoDB');
+              }
+              
+              // Wait a moment then reinitialize
+              setTimeout(() => {
+                console.log('🔄 Reinitializing WhatsApp client...');
+                client.initialize().catch(err => {
+                  logger.error({ event: 'ReinitializationFailed', error: err.message });
+                });
+              }, 3000);
+              
+            } catch (destroyError) {
+              console.log('❌ Failed to destroy client:', destroyError.message);
+              logger.error({ event: 'ClientDestroyFailed', error: destroyError.message });
+            }
           }
         } catch (error) {
           console.log('❌ Failed to retrieve client state:', error.message);
