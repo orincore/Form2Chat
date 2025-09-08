@@ -1,0 +1,14 @@
+2025/09/08-16:41:31.397 13403 Reusing MANIFEST /Users/orincore/Documents/Form2Chat/.wwebjs_auth/session-wa-web-client/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/09/08-16:41:31.397 13403 Recovering log #111
+2025/09/08-16:41:31.406 13403 Reusing old log /Users/orincore/Documents/Form2Chat/.wwebjs_auth/session-wa-web-client/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/000111.log 
+2025/09/08-16:41:31.406 13403 Delete type=2 #107
+2025/09/08-16:41:31.406 13403 Delete type=2 #113
+2025/09/08-16:41:33.363 1ec03 Level-0 table #118: started
+2025/09/08-16:41:33.370 1ec03 Level-0 table #118: 135782 bytes OK
+2025/09/08-16:41:33.378 1ec03 Delete type=0 #111
+2025/09/08-16:41:33.379 1ec03 Manual compaction at level-0 from '\x00.\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00/\x00\x00\x00' @ 0 : 0; will stop at (end)
+2025/09/08-16:41:34.872 1ec03 Compacting 1@1 + 2@2 files
+2025/09/08-16:41:34.919 1ec03 Generated table #119@1: 44654 keys, 2203213 bytes
+2025/09/08-16:41:34.933 1ec03 Generated table #120@1: 11813 keys, 352079 bytes
+2025/09/08-16:41:34.933 1ec03 Compacted 1@1 + 2@2 files => 2555292 bytes
+2025/09/08-16:41:34.941 1ec03 compacted to: files[ 0 0 2 0 0 0 0 ]

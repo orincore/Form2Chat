@@ -1,5 +1,4 @@
-const { Client, RemoteAuth } = require('whatsapp-web.js');
-const { MongoStore } = require('wwebjs-mongo');
+const { Client, LocalAuth } = require('whatsapp-web.js');
 const mongoose = require('mongoose');
 const winston = require('winston');
 const qrcode = require('qrcode-terminal');
@@ -18,6 +17,8 @@ const logger = winston.createLogger({
 // WhatsApp client and store variables
 let client = null;
 let store = null;
+let readyReceived = false;
+let ensuringReady = false;
 
 // Function to initialize WhatsApp client (called after MongoDB connects)
 function initializeWhatsAppClient() {
@@ -26,25 +27,30 @@ function initializeWhatsAppClient() {
     return client;
   }
 
-  console.log('🔄 Initializing WhatsApp client with MongoDB session store...');
+  console.log('🔄 Initializing WhatsApp client with local session store...');
   
-  // Create MongoDB store for session management
-  store = new MongoStore({ mongoose: mongoose });
-
-  // Create WhatsApp client with RemoteAuth strategy
+  // Create WhatsApp client with LocalAuth strategy (more reliable)
   client = new Client({
-    authStrategy: new RemoteAuth({
-      clientId: 'wa-web-client', // Unique identifier for this session
-      store: store,
-      backupSyncIntervalMs: 300000 // 5 minutes backup sync
+    authStrategy: new LocalAuth({
+      clientId: 'wa-web-client',
+      dataPath: './.wwebjs_auth/'
     }),
+    // Disable web version caching to avoid stale/broken WA Web bundles
+    webVersionCache: {
+      type: 'none'
+    },
     puppeteer: {
-      headless: true,
+      headless: 'new',
+      timeout: 60000,
+      defaultViewport: null,
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-gpu'
+        '--disable-gpu',
+        '--disable-features=site-per-process,IsolateOrigins,site-per-process',
+        '--no-zygote'
       ]
     },
     takeoverOnConflict: true,
@@ -68,6 +74,7 @@ function initializeWhatsAppClient() {
     logger.info({ event: 'WhatsAppReady', message: 'WhatsApp client is ready.' });
     console.log('✅ WhatsApp client is ready and authenticated!');
     console.log('📱 You can now send messages through the API.\n');
+    readyReceived = true;
     
     // Log client info for debugging
     console.log('🔍 Client Info:', {
@@ -80,12 +87,15 @@ function initializeWhatsAppClient() {
   client.on('authenticated', (session) => {
     logger.info({ event: 'WhatsAppAuthenticated', message: 'WhatsApp authentication successful.' });
     console.log('✅ WhatsApp authentication successful!');
-    console.log('💾 Session will be saved to MongoDB automatically...');
-    console.log('⏳ Please wait ~1 minute for session to be fully saved to MongoDB.');
+    console.log('💾 Session will be saved automatically by LocalAuth...');
+    console.log('⏳ Please wait ~1 minute for session to be fully written locally.');
     
-    // Add a timeout to check if ready event fires within reasonable time
+    // LocalAuth automatically saves sessions, no manual intervention needed
+    console.log('📁 Session will be saved locally in .wwebjs_auth/ directory');
+    
+    // Start readiness watchdog in case ready event doesn't fire
     setTimeout(async () => {
-      if (!client.info) {
+      if (!client.info && !readyReceived) {
         console.log('⚠️  Ready event not received after authentication. Attempting to force ready state...');
         logger.warn({ 
           event: 'ReadyEventDelayed', 
@@ -94,92 +104,44 @@ function initializeWhatsAppClient() {
         });
         
         // Try to force the client to get info
-        try {
-          console.log('🔄 Attempting to retrieve client info manually...');
-          await client.getState();
-          
-          // Check if we now have info after getState()
-          if (client.info) {
-            console.log('✅ Client info retrieved successfully after manual check!');
-            logger.info({ event: 'ClientInfoRetrieved', wid: client.info.wid });
-          } else {
-            console.log('❌ Still no client info available. Destroying and reinitializing client...');
-            logger.error({ event: 'ClientInfoUnavailable' });
-            
-            // Clear corrupted session and reinitialize
-            try {
-              console.log('🗑️  Clearing corrupted session data...');
-              await client.destroy();
-              
-              // Clear the session from MongoDB
-              if (store) {
-                await store.delete({ session: 'wa-web-client' });
-                console.log('🗑️  Cleared session from MongoDB');
-              }
-              
-              // Wait a moment then reinitialize
-              setTimeout(() => {
-                console.log('🔄 Reinitializing WhatsApp client...');
-                client.initialize().catch(err => {
-                  logger.error({ event: 'ReinitializationFailed', error: err.message });
-                });
-              }, 3000);
-              
-            } catch (destroyError) {
-              console.log('❌ Failed to destroy client:', destroyError.message);
-              logger.error({ event: 'ClientDestroyFailed', error: destroyError.message });
-            }
-          }
-        } catch (error) {
-          console.log('❌ Failed to retrieve client state:', error.message);
-          logger.error({ event: 'ClientStateRetrievalFailed', error: error.message });
-        }
+        await ensureReady(90000).catch(() => {});
       }
     }, 30000); // 30 seconds timeout
   });
 
-  // Listen for remote session saved event
-  client.on('remote_session_saved', () => {
-    logger.info({ event: 'RemoteSessionSaved', message: 'WhatsApp session saved to MongoDB.' });
-    console.log('✅ WhatsApp session successfully saved to MongoDB!');
-    console.log('🔄 Session backups will sync every 5 minutes.');
-    console.log('🚀 Server restarts will now restore this session automatically!');
-    
-    // Sometimes the ready event doesn't fire but session is saved - check if we can get info now
-    setTimeout(async () => {
-      if (!client.info) {
-        try {
-          console.log('🔄 Checking client info after session save...');
-          await client.getState();
-          if (client.info) {
-            console.log('✅ Client is now ready after session save!');
-            logger.info({ event: 'ClientReadyAfterSessionSave', wid: client.info.wid });
-          }
-        } catch (error) {
-          logger.error({ event: 'PostSessionSaveCheckFailed', error: error.message });
-        }
-      }
-    }, 5000);
-  });
+  // LocalAuth doesn't use remote_session_saved event, sessions are saved automatically
 
   // Add session loading event
   client.on('loading_screen', (percent, message) => {
     console.log(`🔄 Loading WhatsApp: ${percent}% - ${message}`);
   });
 
-  // Add debug logging for session restore
-  console.log('🔍 Checking for existing session in MongoDB...');
-  store.sessionExists({ session: 'wa-web-client' })
-    .then(exists => {
-      if (exists) {
-        console.log('✅ Found existing session in MongoDB - will attempt to restore');
-      } else {
-        console.log('⚠️  No existing session found - QR code will be required');
-      }
-    })
-    .catch(err => {
-      console.log('❌ Error checking session:', err.message);
-    });
+  // Log state changes for better diagnostics
+  client.on('change_state', (state) => {
+    console.log(`🔁 WhatsApp state changed: ${state}`);
+    logger.info({ event: 'ChangeState', state });
+  });
+
+  // Add debug logging for session restore with LocalAuth
+  console.log('🔍 Checking for existing local session...');
+  const fs = require('fs');
+  const path = require('path');
+  const sessionPath = path.join('./.wwebjs_auth/', 'session-wa-web-client');
+  
+  if (fs.existsSync(sessionPath)) {
+    console.log('✅ Found existing local session - will attempt to restore');
+  } else {
+    console.log('⚠️  No existing session found - QR code will be required');
+  }
+
+  // After initialization, attempt to ensure ready state in background
+  (async () => {
+    try {
+      await ensureReady(120000); // wait up to 2 minutes on cold start
+    } catch (e) {
+      // Already logged inside ensureReady
+    }
+  })();
 
   client.on('auth_failure', (msg) => {
     logger.error({ event: 'AuthFailure', message: msg });
@@ -189,6 +151,7 @@ function initializeWhatsAppClient() {
   client.on('disconnected', (reason) => {
     logger.warn({ event: 'WhatsAppDisconnected', reason });
     console.log('⚠️  WhatsApp disconnected:', reason);
+    readyReceived = false;
   });
 
   // Initialize the client
@@ -208,25 +171,19 @@ async function sendMessage(number, message) {
   
   while (retryCount < maxRetries) {
     try {
-      // Enhanced client readiness check with fallback
-      let isClientReady = client.info && (client.state === 'CONNECTED' || client.state === undefined);
-      
-      // If client.info is not available but we might be authenticated, try to get state
-      if (!client.info && client.state !== 'UNPAIRED') {
+      // Determine readiness based on connection state or presence of info
+      let currentState = client.state;
+      if (!client.info && currentState !== 'CONNECTED') {
         try {
-          await client.getState();
-          isClientReady = !!client.info;
-        } catch (error) {
-          // If getState fails, we're definitely not ready
-          isClientReady = false;
+          await client.getState(); // may update internal state
+          currentState = client.state;
+        } catch (_) {
+          // ignore, we'll validate below
         }
       }
-      
-      if (!isClientReady) {
-        const statusMsg = !client.info ? 
-          'WhatsApp client is not authenticated. Please scan the QR code first.' :
-          `WhatsApp client is not ready. Current state: ${client.state || 'unknown'}`;
-        throw new Error(statusMsg);
+
+      if (!client.info && currentState !== 'CONNECTED') {
+        throw new Error(`WhatsApp client is not ready. Current state: ${currentState || 'unknown'}`);
       }
 
       // Validate phone number format
@@ -339,13 +296,12 @@ function getClientStatus() {
     };
   }
 
+  const state = client.state || 'UNKNOWN';
   const hasInfo = !!client.info;
-  const state = client.state || (hasInfo ? 'CONNECTED' : 'UNPAIRED');
-  
   return {
-    isReady: hasInfo && (state === 'CONNECTED' || state === 'OPENING' || client.state === undefined),
-    state: state,
-    info: client.info
+    isReady: hasInfo || state === 'CONNECTED',
+    state,
+    info: client.info || null
   };
 }
 
@@ -374,7 +330,7 @@ async function restartClient() {
     console.log('🔄 Restarting WhatsApp client...');
     
     // Destroy existing client
-    if (client.state !== 'UNPAIRED') {
+    if (client && client.state !== 'UNPAIRED') {
       await client.destroy();
     }
     
@@ -401,3 +357,65 @@ module.exports = {
   restartClient,
   initializeWhatsAppClient
 };
+
+// Polls for CONNECTED state; reloads page midway; reinitializes as last resort
+async function ensureReady(maxWaitMs = 60000) {
+  const start = Date.now();
+  let reloaded = false;
+  while (Date.now() - start < maxWaitMs) {
+    // Exit early if already ready
+    if (readyReceived || client.info) {
+      console.log('✅ ensureReady: Client already ready, exiting watchdog.');
+      return;
+    }
+
+    let state = client.state;
+    try {
+      await client.getState();
+      state = client.state || state;
+    } catch (_) {}
+
+    if (state === 'CONNECTED') {
+      console.log('✅ WhatsApp connection state is CONNECTED.');
+      return;
+    }
+
+    // Midway, try a page reload to kick the session
+    const elapsed = Date.now() - start;
+    if (!reloaded && elapsed > maxWaitMs / 2) {
+      if (readyReceived || client.info) {
+        console.log('✅ ensureReady: Ready during watchdog, skip reload.');
+        return;
+      }
+      try {
+        console.log('🔄 Reloading WhatsApp page to recover readiness...');
+        if (client.pupPage && !client.pupPage.isClosed()) {
+          await client.pupPage.reload({ waitUntil: 'networkidle0', timeout: 30000 });
+        }
+        reloaded = true;
+      } catch (err) {
+        console.log('❌ Page reload failed:', err.message);
+        logger.error({ event: 'PageReloadFailed', error: err.message });
+      }
+    }
+
+    await new Promise(r => setTimeout(r, 5000));
+  }
+
+  // As a last resort, reinitialize the client (LocalAuth will reuse session)
+  try {
+    // Double-check before reinitializing
+    if (readyReceived || client.info || client.state === 'CONNECTED') {
+      console.log('✅ ensureReady: Client became ready before reinit, skipping.');
+      return;
+    }
+    console.log('♻️  Reinitializing WhatsApp client to recover readiness...');
+    await client.destroy();
+    await new Promise(r => setTimeout(r, 2000));
+    await client.initialize();
+    logger.warn({ event: 'ClientReinitializedAfterTimeout' });
+  } catch (e) {
+    console.log('❌ Failed to reinitialize client:', e.message);
+    logger.error({ event: 'ClientReinitFailed', error: e.message });
+  }
+}
