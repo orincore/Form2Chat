@@ -84,14 +84,32 @@ function initializeWhatsAppClient() {
     console.log('⏳ Please wait ~1 minute for session to be fully saved to MongoDB.');
     
     // Add a timeout to check if ready event fires within reasonable time
-    setTimeout(() => {
+    setTimeout(async () => {
       if (!client.info) {
-        console.log('⚠️  Ready event not received after authentication. Checking client state...');
+        console.log('⚠️  Ready event not received after authentication. Attempting to force ready state...');
         logger.warn({ 
           event: 'ReadyEventDelayed', 
           state: client.state,
           hasInfo: !!client.info 
         });
+        
+        // Try to force the client to get info
+        try {
+          console.log('🔄 Attempting to retrieve client info manually...');
+          await client.getState();
+          
+          // Check if we now have info after getState()
+          if (client.info) {
+            console.log('✅ Client info retrieved successfully after manual check!');
+            logger.info({ event: 'ClientInfoRetrieved', wid: client.info.wid });
+          } else {
+            console.log('❌ Still no client info available. May need to re-authenticate.');
+            logger.error({ event: 'ClientInfoUnavailable' });
+          }
+        } catch (error) {
+          console.log('❌ Failed to retrieve client state:', error.message);
+          logger.error({ event: 'ClientStateRetrievalFailed', error: error.message });
+        }
       }
     }, 30000); // 30 seconds timeout
   });
@@ -102,6 +120,22 @@ function initializeWhatsAppClient() {
     console.log('✅ WhatsApp session successfully saved to MongoDB!');
     console.log('🔄 Session backups will sync every 5 minutes.');
     console.log('🚀 Server restarts will now restore this session automatically!');
+    
+    // Sometimes the ready event doesn't fire but session is saved - check if we can get info now
+    setTimeout(async () => {
+      if (!client.info) {
+        try {
+          console.log('🔄 Checking client info after session save...');
+          await client.getState();
+          if (client.info) {
+            console.log('✅ Client is now ready after session save!');
+            logger.info({ event: 'ClientReadyAfterSessionSave', wid: client.info.wid });
+          }
+        } catch (error) {
+          logger.error({ event: 'PostSessionSaveCheckFailed', error: error.message });
+        }
+      }
+    }, 5000);
   });
 
   // Add session loading event
@@ -150,8 +184,20 @@ async function sendMessage(number, message) {
   
   while (retryCount < maxRetries) {
     try {
-      // Enhanced client readiness check
-      const isClientReady = client.info && (client.state === 'CONNECTED' || client.state === undefined);
+      // Enhanced client readiness check with fallback
+      let isClientReady = client.info && (client.state === 'CONNECTED' || client.state === undefined);
+      
+      // If client.info is not available but we might be authenticated, try to get state
+      if (!client.info && client.state !== 'UNPAIRED') {
+        try {
+          await client.getState();
+          isClientReady = !!client.info;
+        } catch (error) {
+          // If getState fails, we're definitely not ready
+          isClientReady = false;
+        }
+      }
+      
       if (!isClientReady) {
         const statusMsg = !client.info ? 
           'WhatsApp client is not authenticated. Please scan the QR code first.' :
