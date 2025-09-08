@@ -20,10 +20,8 @@ const otpRateLimiter = rateLimit({
   message: 'Too many OTP requests. Please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    // Use the built-in IP handling for both IPv4 and IPv6
-    return req.ip;
-  }
+  // Remove custom keyGenerator to use the default IP-based key generation
+  // which properly handles both IPv4 and IPv6 addresses
 });
 const winston = require('winston');
 
