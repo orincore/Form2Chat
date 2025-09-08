@@ -68,6 +68,13 @@ function initializeWhatsAppClient() {
     logger.info({ event: 'WhatsAppReady', message: 'WhatsApp client is ready.' });
     console.log('✅ WhatsApp client is ready and authenticated!');
     console.log('📱 You can now send messages through the API.\n');
+    
+    // Log client info for debugging
+    console.log('🔍 Client Info:', {
+      state: client.state,
+      hasInfo: !!client.info,
+      wid: client.info?.wid
+    });
   });
 
   client.on('authenticated', (session) => {
@@ -75,6 +82,18 @@ function initializeWhatsAppClient() {
     console.log('✅ WhatsApp authentication successful!');
     console.log('💾 Session will be saved to MongoDB automatically...');
     console.log('⏳ Please wait ~1 minute for session to be fully saved to MongoDB.');
+    
+    // Add a timeout to check if ready event fires within reasonable time
+    setTimeout(() => {
+      if (!client.info) {
+        console.log('⚠️  Ready event not received after authentication. Checking client state...');
+        logger.warn({ 
+          event: 'ReadyEventDelayed', 
+          state: client.state,
+          hasInfo: !!client.info 
+        });
+      }
+    }, 30000); // 30 seconds timeout
   });
 
   // Listen for remote session saved event
@@ -242,11 +261,19 @@ async function sendMessage(number, message) {
 }
 
 function getClientStatus() {
+  if (!client) {
+    return {
+      isReady: false,
+      state: 'NOT_INITIALIZED',
+      info: null
+    };
+  }
+
   const hasInfo = !!client.info;
   const state = client.state || (hasInfo ? 'CONNECTED' : 'UNPAIRED');
   
   return {
-    isReady: hasInfo && (state === 'CONNECTED' || client.state === undefined),
+    isReady: hasInfo && (state === 'CONNECTED' || state === 'OPENING' || client.state === undefined),
     state: state,
     info: client.info
   };
